@@ -1,33 +1,21 @@
-from typing import Dict, Optional, Tuple
 import flwr as fl
-from utils.utils import getDataset,get_model
 from tf_keras.optimizers import Adam
-from typing import Dict, List
+from utils.utils import getDataset, get_model, evaluate_metrics
 import numpy as np
-import matplotlib.pyplot as plt
-from utils.utils import getDataset, evaluate_metrics, apply_noise_iterative
+import pandas as pd
 
-model,lr,earlystop = get_model()
+# Load and compile the model
+model, lr_schedule, earlystop = get_model()
+model.compile(optimizer=Adam(learning_rate=lr_schedule),
+              loss='binary_crossentropy',
+              metrics=['accuracy'])
 
-model.compile(
-    optimizer=Adam(learning_rate=lr),  # Add the scheduler here
-    loss='binary_crossentropy',
-    metrics=['accuracy']
-)
-
-client_metrics = []
-privacy_metrics = []
-
-def aggregate_fit_metrics(metrics: List[Dict[str, float]]) -> Dict[str, float]:
-    """Aggregate client-reported metrics."""
-    aggregated_metrics = {}
-    for metric_name in metrics[0].keys():
-        aggregated_metrics[metric_name] = sum(metric[metric_name] for metric in metrics) / len(metrics)
-    return aggregated_metrics
+# Store metrics across rounds
+evaluation_metrics = []
 
 def get_global_test_data(num_clients):
-    x_test_list = []
-    y_test_list = []
+    """Combine test data from all clients."""
+    x_test_list, y_test_list = [], []
     for client_id in range(num_clients):
         _, _, x_test, y_test = getDataset(client_id, num_clients)
         x_test_list.append(x_test)
@@ -35,82 +23,75 @@ def get_global_test_data(num_clients):
     return np.concatenate(x_test_list), np.concatenate(y_test_list)
 
 def get_eval_fn(model, num_clients):
-    """Return an evaluation function for server-side evaluation."""
+    """Server-side evaluation function."""
     def evaluate(server_round, parameters, config):
-        global client_metrics, privacy_metrics
-
-        # Set model parameters
+        global evaluation_metrics
         model.set_weights(parameters)
+        
+        # Aggregate global test data
+        x_test, y_test = get_global_test_data(num_clients)
 
-        # Fetch test data for global evaluation (aggregated or client-specific)
-        x_test, y_test = get_global_test_data(num_clients=num_clients)
-
-        # Evaluate the model directly
+        # Evaluate clean data
         loss, accuracy = model.evaluate(x_test, y_test, verbose=0)
-
-        # Get predictions for detailed metrics
         y_pred_probs = model.predict(x_test)
         y_pred = (y_pred_probs > 0.5).astype(int)
+        acc, recall, precision, f1 = evaluate_metrics(y_test, y_pred)
 
-        # Compute standard metrics
-        accuracy, recall, precision, f1 = evaluate_metrics(y_test, y_pred)
+        # Apply noise iteratively and calculate privacy budget
+        noise_scales = [0.1, 1, 2, 5, 10]
+        delta = 1e-5
+        sensitivity = 1.0  # Fixed sensitivity for predictions
 
-        # Apply noise iteratively using predefined scales
-        noise_scales = [0.1, 1, 2, 5, 10]  # Define noise scales
-        noisy_predictions = apply_noise_iterative(y_pred, noise_scales=noise_scales)
+        noisy_metrics = {}
+        for noise_scale in noise_scales:
+            noise = np.random.normal(0, noise_scale, y_pred.shape)
+            noisy_pred = (y_pred + noise > 0.5).astype(int)
+            noisy_acc, _, _, _ = evaluate_metrics(y_test, noisy_pred)
 
-        # Iterate through each noise scale and compute metrics
-        for noise_scale, noisy_pred in noisy_predictions.items():
-            noisy_accuracy, noisy_recall, noisy_precision, noisy_f1 = evaluate_metrics(y_test, noisy_pred)
-            privacy_budget = 1 / noise_scale  # Example privacy budget calculation
+            # Calculate privacy budget (epsilon)
+            epsilon = (sensitivity * np.sqrt(2 * np.log(1.25 / delta))) / noise_scale
 
-            # Store privacy metrics for each scale
-            privacy_metrics.append({
-                "round": server_round,
-                "noise_scale": noise_scale,
-                "privacy_budget": privacy_budget,
-                "noisy_accuracy": noisy_accuracy,
-                "noisy_recall": noisy_recall,
-                "noisy_precision": noisy_precision,
-                "noisy_f1": noisy_f1,
-            })
+            noisy_metrics[f"noisy_accuracy_{noise_scale}"] = noisy_acc
+            noisy_metrics[f"privacy_budget_{noise_scale}"] = epsilon
 
-            # Log metrics for this noise scale
-            print(f"Noise Scale: {noise_scale:.1f}")
-            print(f"Noisy Accuracy: {noisy_accuracy:.4f}, Noisy Recall: {noisy_recall:.4f}, "
-                  f"Noisy Precision: {noisy_precision:.4f}, Noisy F1: {noisy_f1:.4f}, Privacy Budget: {privacy_budget:.4f}")
-
-        # Store standard metrics for visualization
-        client_metrics.append({
+        # Store all metrics
+        round_metrics = {
             "round": server_round,
-            "accuracy": accuracy,
-            "recall": recall,
-            "precision": precision,
-            "f1": f1
-        })
-
-        # Log standard metrics
-        print(f"Round {server_round} Metrics:")
-        print(f"Loss: {loss:.4f}, Accuracy: {accuracy:.4f}, Recall: {recall:.4f}, Precision: {precision:.4f}, F1: {f1:.4f}")
-
-        # Return metrics to the federated server
-        return loss, {
-            "accuracy": accuracy,
+            "loss": loss,
+            "accuracy": acc,
             "recall": recall,
             "precision": precision,
             "f1": f1,
+            **noisy_metrics  # Include noisy metrics
         }
+        evaluation_metrics.append(round_metrics)
 
+        # Log metrics
+        print(f"Round {server_round} Metrics:")
+        print(f"Loss: {loss:.4f}, Accuracy: {acc:.4f}, Recall: {recall:.4f}, Precision: {precision:.4f}, F1: {f1:.4f}")
+        for noise_scale in noise_scales:
+            print(f"Noise Scale {noise_scale}, Noisy Accuracy: {noisy_metrics[f'noisy_accuracy_{noise_scale}']:.4f}, "
+                  f"Privacy Budget: {noisy_metrics[f'privacy_budget_{noise_scale}']:.4f}")
+        
+        return loss, {"accuracy": acc, "f1": f1,"recall":recall,"precision":precision, **noisy_metrics}
+    
     return evaluate
 
 # Define strategy
-strategy = fl.server.strategy.FedAvg(
-    evaluate_fn=get_eval_fn(model,2),
-)
+strategy = fl.server.strategy.FedAvg(evaluate_fn=get_eval_fn(model, num_clients=2))
 
-# Start server
+# Save metrics to CSV after training
+def save_metrics_to_csv(metrics, filename="evaluation_metrics.csv"):
+    df = pd.DataFrame(metrics)
+    df.to_csv(filename, index=False)
+    print(f"Metrics saved to {filename}")
+
+# Start the FL server
 fl.server.start_server(
     server_address="localhost:8080",
     config=fl.server.ServerConfig(num_rounds=50),
     strategy=strategy,
 )
+
+# Export metrics after training
+save_metrics_to_csv(evaluation_metrics)
