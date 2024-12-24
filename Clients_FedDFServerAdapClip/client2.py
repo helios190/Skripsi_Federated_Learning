@@ -2,6 +2,7 @@ import flwr as fl
 from tf_keras.optimizers import Adam
 from utils.utils import getDataset, get_model, evaluate_metrics
 from sklearn.metrics import roc_auc_score
+from utils.fedDFserverAdaptive import adaptive_clip_inputs_inplace
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
