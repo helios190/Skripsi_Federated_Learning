@@ -78,7 +78,7 @@ def evaluate_metrics_aggregation_fn(metrics):
     return aggregated_metrics
 
 # Save metrics and logs to CSV
-def save_metrics_to_csv(metrics, logs, metrics_filename="./results/evaluation_10_0.5_metrics_FDFSFC.csv", logs_filename="info_logs.csv"):
+def save_metrics_to_csv(metrics, logs, metrics_filename="./results/FDFSFC/FDFSFC_0.1_50.csv", logs_filename="info_logs.csv"):
     formatted_metrics = []
     for entry in metrics:
         formatted_entry = {
@@ -106,7 +106,7 @@ def save_metrics_to_csv(metrics, logs, metrics_filename="./results/evaluation_10
     logging.info(f"Logs saved to {logs_filename}")
 
 # Differential privacy parameters
-noise_multiplier = 10.0  # Adjust based on desired privacy level
+noise_multiplier = 0.1 # Adjust based on desired privacy level
 clipping_norm = 0.5     # Fixed clipping norm value
 num_sampled_clients = 2 # Number of clients sampled per round
 
@@ -156,7 +156,7 @@ dp_strategy.aggregate_fit = hooked_aggregate_fit
 # Start the federated learning server
 fl.server.start_server(
     server_address="localhost:8080",
-    config=fl.server.ServerConfig(num_rounds=5),
+    config=fl.server.ServerConfig(num_rounds=50),
     strategy=dp_strategy,
 )
 

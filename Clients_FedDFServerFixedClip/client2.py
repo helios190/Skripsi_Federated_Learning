@@ -2,6 +2,7 @@ import flwr as fl
 from tf_keras.optimizers import Adam
 from utils.utils import getDataset, get_model, evaluate_metrics
 from sklearn.metrics import roc_auc_score
+from utils.fedDFserverAdaptive import adaptive_clip_inputs_inplace
 import numpy as np
 import logging
 
@@ -11,14 +12,22 @@ x_train, y_train, x_test, y_test = getDataset(client_id=1, num_clients=2, split_
 model, lr_schedule, earlystop = get_model()
 model.compile(optimizer=Adam(learning_rate=lr_schedule), loss='binary_crossentropy', metrics=['accuracy'])
 
+def fixed_clipping(updates, clipping_norm):
+    norm = np.sqrt(sum(np.sum(np.square(u)) for u in updates))
+    if norm > clipping_norm:
+        scale = clipping_norm / norm
+        updates = [u * scale for u in updates]
+    return updates
+
 class FlwrClient(fl.client.NumPyClient):
-    def __init__(self, model, x_train, y_train, x_test, y_test, earlystop):
+    def __init__(self, model, x_train, y_train, x_test, y_test, earlystop, clipping_norm):
         self.model = model
         self.x_train = x_train
         self.y_train = y_train
         self.x_test = x_test
         self.y_test = y_test
         self.earlystop = earlystop
+        self.clipping_norm = clipping_norm
 
     def get_parameters(self, config):
         return self.model.get_weights()
@@ -38,25 +47,14 @@ class FlwrClient(fl.client.NumPyClient):
         updated_weights = self.model.get_weights()
         updates = [w - p for w, p in zip(updated_weights, parameters)]
 
-        clipping_norm = config.get("clipping_norm", None)
-        if clipping_norm is not None:
-            updates = self._clip_updates(updates, clipping_norm)
+        # Apply fixed clipping
+        updates = fixed_clipping(updates, self.clipping_norm)
 
-        updated_parameters = [p + u for p, u in zip(parameters, updates)]
-
-        return updated_parameters, len(self.x_train), {
+        # Return updated weights and metrics
+        return [p + u for p, u in zip(parameters, updates)], len(self.x_train), {
             "loss": history.history["loss"][-1],
-            "accuracy": history.history["accuracy"][-1],
-            "val_loss": history.history["val_loss"][-1],
-            "val_accuracy": history.history["val_accuracy"][-1]
+            "accuracy": history.history["accuracy"][-1]
         }
-
-    def _clip_updates(self, updates, clipping_norm):
-        total_norm = sum(np.linalg.norm(update) ** 2 for update in updates) ** 0.5
-        if total_norm > clipping_norm:
-            scaling_factor = clipping_norm / total_norm
-            updates = [update * scaling_factor for update in updates]
-        return updates
 
     def evaluate(self, parameters, config):
         self.model.set_weights(parameters)
@@ -71,7 +69,6 @@ class FlwrClient(fl.client.NumPyClient):
         logging.info(f"Evaluation - Loss: {loss}, Accuracy: {accuracy}, Recall: {recall}, Precision: {precision}, F1: {f1}, AUC: {auc}")
 
         return loss, len(self.x_test), {
-            "loss": loss,
             "accuracy": accuracy,
             "f1": f1,
             "recall": recall,
@@ -79,5 +76,5 @@ class FlwrClient(fl.client.NumPyClient):
             "auc": auc
         }
 
-client = FlwrClient(model, x_train, y_train, x_test, y_test, earlystop)
+client = FlwrClient(model, x_train, y_train, x_test, y_test, earlystop,0.5)
 fl.client.start_numpy_client(server_address="localhost:8080", client=client)

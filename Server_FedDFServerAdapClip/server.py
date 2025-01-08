@@ -79,7 +79,7 @@ def evaluate_metrics_aggregation_fn(metrics):
     return aggregated_metrics
 
 # Save metrics and logs to CSV
-def save_metrics_to_csv(metrics, logs, metrics_filename="./results/evaluation_1_0.1_metrics_FDFSAC.csv", logs_filename="info_logs.csv"):
+def save_metrics_to_csv(metrics, logs, metrics_filename="./results/testing/FDFSAC_0_50.csv", logs_filename="info_logs.csv"):
     metrics_df = pd.DataFrame(metrics)
     metrics_df.to_csv(metrics_filename, index=False)
     logging.info(f"Metrics saved to {metrics_filename}")
@@ -94,12 +94,12 @@ dp_strategy = DifferentialPrivacyServerSideAdaptiveClipping(
         evaluate_fn=get_eval_fn(model, num_clients=2),
         evaluate_metrics_aggregation_fn=evaluate_metrics_aggregation_fn,
     ),
-    noise_multiplier=1,  # Adjusted for better privacy-utility trade-off
+    noise_multiplier=0,  # Adjusted for better privacy-utility trade-off
     num_sampled_clients=2,  # Fixed
     initial_clipping_norm=0.1,  # Start small for exponential growth
-    target_clipped_quantile=0.5,  # Median clipping
+    target_clipped_quantile=0.9,  # Median clipping
     clip_norm_lr=0.2,  # Suggested learning rate for clipping norm
-    clipped_count_stddev=1,  # Based on number of sampled clients
+    clipped_count_stddev=0.1,  # Based on number of sampled clients
 )
 
 # Hook into the strategy to log clipping norm, noise, and NSR
@@ -134,7 +134,7 @@ dp_strategy.aggregate_fit = hooked_aggregate_fit
 # Start federated server
 fl.server.start_server(
     server_address="localhost:8080",
-    config=fl.server.ServerConfig(num_rounds=5),
+    config=fl.server.ServerConfig(num_rounds=50),
     strategy=dp_strategy
 )
 

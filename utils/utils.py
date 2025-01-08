@@ -44,7 +44,9 @@ def get_model() :
     )
     return model,lr_schedule,early_stopping
 
-def getDataset(client_id, num_clients=2, split_ratios=None, file_path='/Users/bintangrestubawono/Documents/skripsi_FL/Skripsi_Federated_Learning/data/creditcard.csv'):
+
+def getDataset(client_id, num_clients=2, split_ratios=None,
+               file_path='/Users/bintangrestubawono/Documents/skripsi_FL/Skripsi_Federated_Learning/data/creditcard.csv'):
     """
     Split the dataset into distinct portions for each client based on specified ratios.
     Each client fetches its unique portion based on `client_id`.
@@ -62,18 +64,16 @@ def getDataset(client_id, num_clients=2, split_ratios=None, file_path='/Users/bi
     - y_test (np.ndarray): Testing labels for the specific client.
     """
 
+    # Step 1: Load the dataset
     df = pd.read_csv(file_path)
     X = df.drop(columns=['Class'])
     y = df['Class']
 
-    ros = RandomOverSampler(random_state=42)
-    X_resampled, y_resampled = ros.fit_resample(X, y)
-
+    # Step 2: Standardize the features
     scaler = StandardScaler()
-    X_resampled_scaled = scaler.fit_transform(X_resampled)
+    X_scaled = scaler.fit_transform(X)
 
-    X_resampled_scaled = np.expand_dims(X_resampled_scaled, axis=1)
-
+    # Step 3: Define split ratios if not provided
     if split_ratios is None:
         split_ratios = [1 / num_clients] * num_clients
 
@@ -83,34 +83,40 @@ def getDataset(client_id, num_clients=2, split_ratios=None, file_path='/Users/bi
     if not np.isclose(sum(split_ratios), 1.0):
         raise ValueError("Split ratios must sum to 1.")
 
-    indices = np.arange(len(X_resampled_scaled))
+    # Step 4: Shuffle and split the data for clients
+    indices = np.arange(len(X_scaled))
     np.random.shuffle(indices)
-    X_resampled_scaled = X_resampled_scaled[indices]
-    y_resampled = y_resampled.iloc[indices].reset_index(drop=True)
+    X_scaled = X_scaled[indices]
+    y = y.iloc[indices].reset_index(drop=True)
 
-    total_samples = len(X_resampled_scaled)
+    total_samples = len(X_scaled)
     start_idx = 0
     client_data = {}
 
     for i, ratio in enumerate(split_ratios):
         end_idx = start_idx + int(total_samples * ratio)
-        if i == num_clients - 1: 
+        if i == num_clients - 1:  # Ensure the last client gets the remaining samples
             end_idx = total_samples
-        client_data[i] = (X_resampled_scaled[start_idx:end_idx], y_resampled[start_idx:end_idx])
+        client_data[i] = (X_scaled[start_idx:end_idx], y[start_idx:end_idx])
         start_idx = end_idx
 
+    # Step 5: Get the specific client's data
     if client_id not in client_data:
         raise ValueError(f"Invalid client_id: {client_id}. Must be between 0 and {num_clients - 1}.")
     X_client, y_client = client_data[client_id]
 
+    # Step 6: Perform Random Oversampling for the client's data
+    ros = RandomOverSampler(random_state=42)
+    X_client_resampled, y_client_resampled = ros.fit_resample(X_client, y_client)
+
+    # Step 7: Split the client's data into training and testing sets (stratified)
     X_train, X_test, y_train, y_test = train_test_split(
-        X_client, y_client, test_size=0.2, random_state=42
+        X_client_resampled, y_client_resampled, test_size=0.2, random_state=42, stratify=y_client_resampled
     )
-
-    y_train = y_train.values.reshape(-1, 1)
-    y_test = y_test.values.reshape(-1, 1)
-
-    return X_train, y_train, X_test, y_test
+    X_train = X_train.reshape((X_train.shape[0], 1, X_train.shape[1]))
+    X_test = X_test.reshape((X_test.shape[0], 1, X_test.shape[1]))
+    # Step 8: Return the split datasets
+    return X_train, y_train.values.reshape(-1, 1), X_test, y_test.values.reshape(-1, 1)
 
 def apply_noise_iterative(y_pred, noise_scales=[0.1, 0.5, 1, 5, 10], sensitivity=1.0, delta=1e-5):
     """
