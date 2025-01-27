@@ -34,16 +34,10 @@ This project demonstrates the implementation of **Federated Learning (FL)** with
 5. **`results/`**  
    - Saves the output from the FL experiments, including logs and aggregated models.
 
-6. **`visualizer/`**  
+6. **`analysis.ipynb`**  
    - Tools for visualizing results (e.g., performance metrics, graphs).
 
-7. **`analysis.ipynb`**  
-   - Jupyter notebook for analyzing the FL results.
-
-8. **`README.md`**  
-   - This file.
-
-9. **`requirements.txt`**  
+7. **`requirements.txt`**  
    - List of required Python dependencies.
 
 ### Workflow
