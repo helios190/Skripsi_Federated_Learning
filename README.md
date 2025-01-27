@@ -16,7 +16,7 @@ This project demonstrates the implementation of **Federated Learning (FL)** with
      - `FedDFServerAdapClip`: Contains client-specific experiments related to server-side adaptive clipping.
      - `FedDFServerFixedClip`: Contains client-specific experiments related to server-side fixed clipping.
 
-2. **`server/`**  
+2. **`server/`** 
    - Contains server-side logic for FL experiments.  
    - Subfolders:
      - `FedDFServerAdapClip`: Implements adaptive clipping on the server.
@@ -26,6 +26,7 @@ This project demonstrates the implementation of **Federated Learning (FL)** with
    - Includes utility functions:
      - Splitting datasets.
      - LSTM implementation and preprocessing.
+     - Data Balancing Process - Random Oversampling
 
 4. **`data/`**  
    - Directory for storing input data for the experiments.
